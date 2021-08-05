@@ -13,10 +13,12 @@
       MotiveDataDescriptionsUpdateTimeSec="1.0" >
       <DataSources>
         <DataSource Type="Tool" Id="Webcam" />
+        <DataSource Type="Tool" Id="Needle" />
       </DataSources>
       <OutputChannels>
         <OutputChannel Id="TrackerStream">
         <DataSource Type="Tool" Id="Webcam" />
+        <DataSource Type="Tool" Id="Needle" />
         </OutputChannel>
       </OutputChannels>
     </Device>
@@ -33,6 +35,7 @@
       </MessageTypes>
       <TransformNames>
         <Transform Name="WebcamToTracker" />
+        <Transform Name="NeedleToTracker" />
       </TransformNames>
     </DefaultClientInfo>
   </PlusOpenIGTLinkServer>

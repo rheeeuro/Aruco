@@ -104,7 +104,7 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
             </view>
            </item>
            <item>
-            <view class="vtkMRMLSliceNode" singletontag="webcam">
+            <view class="vtkMRMLSliceNode" singletontag="Webcam">
              <property name="orientation" action="default">Sagittal</property>
              <property name="viewlabel" action="default">W</property>
              <property name="viewcolor" action="default">#333333</property>
@@ -138,10 +138,17 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     self.webcamFix = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     self.webcamFix.SetName('webcamFix')
-    webcamFixMatrix = vtk.vtkMatrix4x4()
-    webcamFixMatrix.SetElement(1, 1, -1)
-    webcamFixMatrix.SetElement(2, 2, -1)
-    self.webcamFix.SetMatrixTransformToParent(webcamFixMatrix)
+
+    self.vertorFix = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
+    self.vertorFix.SetName('vertorFix')
+    vertorFixMatrix = vtk.vtkMatrix4x4()
+    vertorFixMatrix.SetElement(0, 0, -1)
+    vertorFixMatrix.SetElement(1, 1, 0)
+    vertorFixMatrix.SetElement(2, 2, 0)
+    vertorFixMatrix.SetElement(1, 2, 1)
+    vertorFixMatrix.SetElement(2, 1, 1)
+    self.vertorFix.SetMatrixTransformToParent(webcamToSlicerMatrix)
+
 
   def initialConnector(self):
     # IGTLConnector 노드 생성
@@ -211,22 +218,6 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     markerModel = slicer.modules.createmodels.logic().CreateCube(100, 0.1, 100, None)
 
-    beamNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLRTBeamNode')
-    beamNode.SetSAD(fx)
-    beamNode.SetX1Jaw(-cx)
-    beamNode.SetX2Jaw(cx)
-    beamNode.SetY1Jaw(-cy)
-    beamNode.SetY2Jaw(cy)
-    beamNode.SetDisplayVisibility(True)
-
-    beamMatrix = vtk.vtkMatrix4x4()
-    beamMatrix.SetElement(0, 0, -1)
-    beamMatrix.SetElement(2, 2, -1)
-    beamMatrix.SetElement(2, 3, fx)
-    beamNode.ApplyTransformMatrix(beamMatrix)
-
-    beamNode.SetAndObserveTransformNodeID(self.arucoWebcam.GetID())
-
     points = vtk.vtkPoints()
     points.SetNumberOfPoints(13)
     points.SetPoint(0,  0.0, 0.0, 0.0)
@@ -247,6 +238,18 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.lineNode = slicer.modules.models.logic().AddModel(line.GetOutputPort())
     self.lineNode.SetAndObserveTransformNodeID(self.arucoWebcam.GetID())
 
+    webcamFixMatrix = vtk.vtkMatrix4x4()
+    webcamFixMatrix.SetElement(0, 0, 0)
+    webcamFixMatrix.SetElement(1, 1, 0)
+    webcamFixMatrix.SetElement(2, 2, 0)
+    webcamFixMatrix.SetElement(0, 1, 1)
+    webcamFixMatrix.SetElement(1, 2, 1)
+    webcamFixMatrix.SetElement(2, 0, -1)
+
+    webcamFixMatrix.SetElement(0, 3, -1*cx)
+    webcamFixMatrix.SetElement(1, 3, -1*cy)
+    webcamFixMatrix.SetElement(2, 3, fx)
+    self.webcamFix.SetMatrixTransformToParent(webcamFixMatrix)
 
     def intervalFunction():
       success, img = cap.read()
@@ -258,6 +261,11 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       slicer.util.updateVolumeFromArray(self.volumeNode, img)
       slicer.util.setSliceViewerLayers(background=self.volumeNode)
       self.volumeNode.SetAndObserveTransformNodeID(self.webcamFix.GetID())
+      slicer.util.resetSliceViews()
+      self.webcamFix.SetAndObserveTransformNodeID(self.arucoWebcam.GetID())
+
+      slicer.modules.volumereslicedriver.logic().SetDriverForSlice(self.volumeNode.GetID(), slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeWebcam'))
+      slicer.modules.volumereslicedriver.logic().SetModeForSlice(4, slicer.mrmlScene.GetNodeByID('vtkMRMLSliceNodeWebcam'))
 
       # cv2.imshow("Image", img)        
       # cv2.waitKey(1)
@@ -318,12 +326,22 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     return arucoPosition
 
-  def webCamToSlicer(self, vec):
-    return np.array([-vec[0], -vec[2], -vec[1]])
 
   def onAddBtn(self):
-    slicer.modules.fiducialregistrationwizard.logic().AddFiducial(self.arucoWebcam, self.fromFids)
-    slicer.modules.fiducialregistrationwizard.logic().AddFiducial(self.optiTrackConnector.GetIncomingMRMLNode(0), self.toFids)
+    if (self.optiTrackConnector.GetNumberOfIncomingMRMLNodes() < 2):
+      self.needleToTracker = None
+      self.webcamToTracker = None
+      return
+    else:
+      for i in range(self.optiTrackConnector.GetNumberOfIncomingMRMLNodes()):
+        node = self.optiTrackConnector.GetIncomingMRMLNode(i)
+        if node.GetName() == 'NeedleToTracker':
+            self.needleToTracker = node
+        if node.GetName() == 'WebcamToTracker':
+            self.webcamToTracker = node
+
+      slicer.modules.fiducialregistrationwizard.logic().AddFiducial(self.webcamToTracker, self.fromFids)
+      slicer.modules.fiducialregistrationwizard.logic().AddFiducial(self.arucoWebcam, self.toFids)
     
 
   def onCompleteBtn(self):
@@ -332,7 +350,8 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self.fromFids.SetNthFiducialVisibility(i, False)
       self.toFids.SetNthFiducialVisibility(i, False)
 
-    self.arucoWebcam.SetAndObserveTransformNodeID(self.fiducialReg.GetID())
+    self.vertorFix.SetAndObserveTransformNodeID(self.webcamToTracker.GetID())
+    self.webcamToTracker.SetAndObserveTransformNodeID(self.fiducialReg.GetID())
     
 
   def cleanup(self):
