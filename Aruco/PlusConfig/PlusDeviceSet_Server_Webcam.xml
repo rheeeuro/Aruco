@@ -1,33 +1,27 @@
-<PlusConfiguration version="2.7">
-  <DataCollection StartupDelaySec="1.0">
-    <DeviceSet
-      Name="PlusServer: OptiTrack (Webcam)"
-      Description="Broadcasting tracking data through OpenIGTLink."
-    />
+<PlusConfiguration version="2.1">
+  <DataCollection StartupDelaySec="1.0" >
+    <DeviceSet 
+      Name="CANINEHIPNAV PlusServer: NDI Polaris tracker with passive markers" 
+      Description="Broadcasting tool tracking data through OpenIGTLink For NDI Polaris passive marker starting kit: Reamer (8700338), Stylus (8700340), Impactor (8700339), and Reference (8700449)" />
     <Device
       Id="TrackerDevice"
-      Type="OptiTrack"
-      ToolReferenceFrame="Tracker" 
-      ProjectFile="Optic.ttp"
-      AttachToRunningMotive="FALSE"
-      MotiveDataDescriptionsUpdateTimeSec="1.0" >
+      Type="PolarisTracker"
+      ToolReferenceFrame="Tracker" >
       <DataSources>
-        <DataSource Type="Tool" Id="Webcam" />
-        <DataSource Type="Tool" Id="Needle" />
+        <DataSource Type="Tool" Id="Webcam" RomFile="1.rom"  />]
       </DataSources>
       <OutputChannels>
-        <OutputChannel Id="TrackerStream">
-        <DataSource Type="Tool" Id="Webcam" />
-        <DataSource Type="Tool" Id="Needle" />
+        <OutputChannel Id="TrackerStream" >
+          <DataSource Id="Webcam"/>
         </OutputChannel>
       </OutputChannels>
     </Device>
   </DataCollection>
-  <PlusOpenIGTLinkServer
+  <PlusOpenIGTLinkServer 
     MaxNumberOfIgtlMessagesToSend="1"
     MaxTimeSpentWithProcessingMs="50"
     ListeningPort="18944"
-    SendValidTransformsOnly="TRUE"
+    SendValidTransformsOnly="true"
     OutputChannelId="TrackerStream" >
     <DefaultClientInfo>
       <MessageTypes>
@@ -35,9 +29,7 @@
       </MessageTypes>
       <TransformNames>
         <Transform Name="WebcamToTracker" />
-        <Transform Name="NeedleToTracker" />
       </TransformNames>
     </DefaultClientInfo>
   </PlusOpenIGTLinkServer>
-  
 </PlusConfiguration>

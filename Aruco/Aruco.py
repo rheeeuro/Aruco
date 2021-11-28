@@ -120,9 +120,11 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.layoutManager.setLayout(501)
 
   def initialTransform(self):
+    # 마커를 통한 웹캠 Transform
     self.arucoWebcam = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     self.arucoWebcam.SetName('arucoWebcam')
 
+    # 웹캠 - 슬라이서 좌표축 변환 Transform
     self.webcamToSlicer = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     self.webcamToSlicer.SetName('webcamToSlicer')
     webcamToSlicerMatrix = vtk.vtkMatrix4x4()
@@ -133,9 +135,11 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     webcamToSlicerMatrix.SetElement(2, 1, 1)
     self.webcamToSlicer.SetMatrixTransformToParent(webcamToSlicerMatrix)
 
+    # 웹캠 위치 확인용 needle 모델
     self.p = slicer.modules.createmodels.logic().CreateNeedle(80.0, 1.0, 2.5, False, None)
     self.p.SetAndObserveTransformNodeID(self.arucoWebcam.GetID())
 
+    # 슬라이스 뷰에 웹캠 화면 표시용, 벡터 변환용 transform
     self.webcamFix = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode')
     self.webcamFix.SetName('webcamFix')
 
@@ -195,12 +199,12 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
   def videoCapture(self):
     cap = cv2.VideoCapture(1)
+
+    # 카메라 파라미터 받아오기
     filepath = os.path.abspath(os.getcwd()).replace(
             '\\', '/') + '/Aruco/Aruco/calibrationCoefficients.yaml'
     cv_file = cv2.FileStorage(filepath, cv2.FILE_STORAGE_READ)
 
-    # note we also have to specify the type to retrieve other wise we only get a
-    # FileNode object back instead of a matrix
     matrix_coefficients = cv_file.getNode("camera_matrix").mat()
     distortion_coefficients = cv_file.getNode("dist_coeff").mat()
 
@@ -216,6 +220,7 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     fx = matrix_coefficients[0][0]
     fy = matrix_coefficients[1][1]
 
+    # 카메라 뷰 프로젝션 모델 생성
     markerModel = slicer.modules.createmodels.logic().CreateCube(100, 0.1, 100, None)
 
     points = vtk.vtkPoints()
@@ -238,6 +243,7 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.lineNode = slicer.modules.models.logic().AddModel(line.GetOutputPort())
     self.lineNode.SetAndObserveTransformNodeID(self.arucoWebcam.GetID())
 
+    # 웹캠 뷰를 3d 뷰에 옮기기 위한 transform matrix
     webcamFixMatrix = vtk.vtkMatrix4x4()
     webcamFixMatrix.SetElement(0, 0, 0)
     webcamFixMatrix.SetElement(1, 1, 0)
@@ -251,6 +257,7 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     webcamFixMatrix.SetElement(2, 3, fx)
     self.webcamFix.SetMatrixTransformToParent(webcamFixMatrix)
 
+    # 웹캠 뷰 및 트랜스폼 업데이트 함수 (interval 함수)
     def intervalFunction():
       success, img = cap.read()
       arucoPosition = self.findArucoMarkers(img, matrix_coefficients, distortion_coefficients)
@@ -270,12 +277,14 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       # cv2.imshow("Image", img)        
       # cv2.waitKey(1)
 
+    # interval 함수 qtimer 에 등록
     self.timer = qt.QTimer()
     self.timer.setInterval(1)
     self.timer.start()
     self.timer.timeout.connect(intervalFunction)
 
-  def findArucoMarkers(self, img, matrix_coefficients, distortion_coefficients, markerSize=4, totalMarkers=250, draw=True):
+  def findArucoMarkers(self, img, matrix_coefficients, distortion_coefficients, markerSize=6, totalMarkers=250, draw=True):
+    # 마커 detect
     imgGray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     key = getattr(aruco, f'DICT_{markerSize}X{markerSize}_{totalMarkers}')
     arucoDict = aruco.Dictionary_get(key)
@@ -292,18 +301,18 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     arucoPosition = []
 
-    if np.all(ids is not None):
-      zipped = zip(ids, corners)
-      ids, corners = zip(*(sorted(zipped)))
-      for i in range(0, len(ids)):  # Iterate in markers
-      # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
-        rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i], 100, matrix_coefficients, distortion_coefficients)
-        
-        # https://github.com/naruya/aruco
+    # acuro board 생성
+    board = aruco.GridBoard_create(5, 7, 2.15, 0.5, arucoDict)
+    rvec = None
+    tvec = None
+    if (len(corners) > 0) and (len(ids) > 0):
+      success, rvec, tvec = aruco.estimatePoseBoard(corners, ids, board, matrix_coefficients, distortion_coefficients, rvec, tvec)
+      
+      if success:
+        aruco.drawAxis(img, matrix_coefficients, distortion_coefficients, rvec, tvec, 5)
         R = cv2.Rodrigues(rvec)[0]
         R_T = R.T
-        T = tvec[0].T
-
+        T = tvec
         xyz = np.dot(R_T, - T).squeeze()
         rpy = np.deg2rad(cv2.RQDecomp3x3(R_T)[0])
 
@@ -314,29 +323,57 @@ class ArucoWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         for i in range(3):
           cameraMatrix.SetElement(i, 3, xyz[i])    
         self.arucoWebcam.SetMatrixTransformToParent(cameraMatrix)
+    
+        self.arucoWebcam.SetAndObserveTransformNodeID(self.webcamToSlicer.GetID())
+    return arucoPosition
+
+    # # board 대신 marker를 이용하는 경우
+    
+    # if np.all(ids is not None):
+    #   zipped = zip(ids, corners)
+    #   ids, corners = zip(*(sorted(zipped)))
+    #   for i in range(0, len(ids)):  # Iterate in markers
+    #   # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
+    #     rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i], 100, matrix_coefficients, distortion_coefficients)
+        
+    #     print(rvec)
+    #     print()
+    #     print(tvec)
+    #     # https://github.com/naruya/aruco
+    #     R = cv2.Rodrigues(rvec)[0]
+    #     R_T = R.T
+    #     T = tvec[0].T
+
+    #     xyz = np.dot(R_T, - T).squeeze()
+    #     rpy = np.deg2rad(cv2.RQDecomp3x3(R_T)[0])
+
+    #     cameraMatrix = vtk.vtkMatrix4x4()
+    #     for i in range(3):
+    #       for j in range(3):
+    #         cameraMatrix.SetElement(i, j, R_T[i][j])
+    #     for i in range(3):
+    #       cameraMatrix.SetElement(i, 3, xyz[i])    
+    #     self.arucoWebcam.SetMatrixTransformToParent(cameraMatrix)
  
 
-        x = (fx * tvec[0][0][0] / tvec[0][0][2]) + cx
-        y = (fy * tvec[0][0][1] / tvec[0][0][2]) + cy
-        arucoPosition.append([x, y])
+    #     x = (fx * tvec[0][0][0] / tvec[0][0][2]) + cx
+    #     y = (fy * tvec[0][0][1] / tvec[0][0][2]) + cy
+    #     arucoPosition.append([x, y])
 
-        # self.arucoWebcam.SetAndObserveTransformNodeID(self.webcamToSlicer.GetID())
-        self.arucoWebcam.SetAndObserveTransformNodeID(self.webcamToSlicer.GetID())
+    #     # self.arucoWebcam.SetAndObserveTransformNodeID(self.webcamToSlicer.GetID())
+    #     self.arucoWebcam.SetAndObserveTransformNodeID(self.webcamToSlicer.GetID())
 
 
-    return arucoPosition
+    # return arucoPosition
 
 
   def onAddBtn(self):
-    if (self.optiTrackConnector.GetNumberOfIncomingMRMLNodes() < 2):
-      self.needleToTracker = None
+    if (self.optiTrackConnector.GetNumberOfIncomingMRMLNodes() < 1):
       self.webcamToTracker = None
       return
     else:
       for i in range(self.optiTrackConnector.GetNumberOfIncomingMRMLNodes()):
         node = self.optiTrackConnector.GetIncomingMRMLNode(i)
-        if node.GetName() == 'NeedleToTracker':
-            self.needleToTracker = node
         if node.GetName() == 'WebcamToTracker':
             self.webcamToTracker = node
 
